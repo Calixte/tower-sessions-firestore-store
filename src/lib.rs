@@ -107,7 +107,7 @@ impl SessionStore for FirestoreStore {
             .in_col(self.collection_id.as_ref())
             .document_id(&record.id.to_string())
             .object(&doc)
-            .execute()
+            .execute::<()>()
             .await
             .map_err(FirestoreStoreError::Firestore)?;
         Ok(())
