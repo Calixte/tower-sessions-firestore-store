@@ -2,7 +2,10 @@ use std::{collections::HashMap, str::FromStr, sync::Arc};
 
 use async_trait::async_trait;
 use chrono::{DateTime, TimeZone, Utc};
-use firestore::FirestoreDb;
+use firestore::{
+    errors::{FirestoreDataConflictError, FirestoreError, FirestoreErrorPublicGenericDetails},
+    FirestoreDb,
+};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use time::OffsetDateTime;
@@ -99,6 +102,33 @@ impl From<Record> for FirestoreDocument {
 
 #[async_trait]
 impl SessionStore for FirestoreStore {
+    async fn create(&self, record: &mut Record) -> session_store::Result<()> {
+        loop {
+            let doc = FirestoreDocument::from(record.clone());
+            match self
+                .db
+                .fluent()
+                .insert()
+                .into(self.collection_id.as_ref())
+                .document_id(&record.id.to_string())
+                .object(&doc)
+                .execute::<()>()
+                .await
+            {
+                Err(FirestoreError::DataConflictError(FirestoreDataConflictError {
+                    public: FirestoreErrorPublicGenericDetails { code },
+                    details: _,
+                })) if code == "AlreadyExists" => {
+                    record.id = Id::default();
+                    continue;
+                }
+                result => break result,
+            }
+        }
+        .map_err(FirestoreStoreError::Firestore)?;
+        Ok(())
+    }
+
     async fn save(&self, record: &Record) -> session_store::Result<()> {
         let doc = FirestoreDocument::from(record.clone());
         self.db
